@@ -1,0 +1,94 @@
+#!/bin/bash
+# 简单可靠的 MESA 安装脚本
+set -e
+
+echo "=== 简单 MESA 安装 ==="
+
+# 1. 清理旧的（如果存在）
+echo "清理旧的安装..."
+rm -rf ~/mesasdk ~/mesa ~/mesa_work 2>/dev/null || true
+
+# 2. 检查文件是否存在
+echo "检查文件..."
+if [ ! -f "/mnt/d/mesa/mesasdk-x86_64-linux-24.7.1.tar.gz" ]; then
+    echo "错误：找不到 SDK 文件"
+    exit 1
+fi
+
+if [ ! -f "/mnt/d/mesa/mesa-24.08.1.zip" ]; then
+    echo "错误：找不到 MESA 文件"
+    exit 1
+fi
+
+echo "✓ 文件检查通过"
+
+# 3. 安装 SDK
+echo "安装 MESA SDK..."
+mkdir -p ~/mesasdk
+tar -xzf "/mnt/d/mesa/mesasdk-x86_64-linux-24.7.1.tar.gz" -C ~/mesasdk --strip-components=1
+
+# 修复 MANPATH 问题
+export MANPATH="${MANPATH:-}"
+export MESASDK_ROOT="$HOME/mesasdk"
+source "$MESASDK_ROOT/bin/mesasdk_init.sh"
+
+echo "✓ SDK 安装完成"
+gfortran --version | head -1
+
+# 4. 安装 MESA 源代码
+echo "安装 MESA 源代码..."
+mkdir -p ~/mesa
+unzip -q "/mnt/d/mesa/mesa-24.08.1.zip" -d /tmp
+
+# 查找并复制 MESA 目录
+MESA_SRC=$(find /tmp -maxdepth 2 -name "mesa*" -type d | grep -v mesasdk | head -1)
+if [ -n "$MESA_SRC" ]; then
+    cp -r "$MESA_SRC"/* ~/mesa/
+    echo "✓ MESA 源代码安装完成"
+else
+    echo "错误：找不到 MESA 目录"
+    exit 1
+fi
+
+# 5. 设置环境变量
+echo "设置环境变量..."
+CPU_CORES=$(nproc 2>/dev/null || echo 2)
+
+cat >> ~/.bashrc << EOF
+
+# MESA 配置
+export MESASDK_ROOT="\$HOME/mesasdk"
+export MESA_DIR="\$HOME/mesa"
+export OMP_NUM_THREADS=$CPU_CORES
+export PATH=\$PATH:\$MESA_DIR/scripts/shmesa
+
+if [ -f "\$MESASDK_ROOT/bin/mesasdk_init.sh" ]; then
+    source "\$MESASDK_ROOT/bin/mesasdk_init.sh"
+fi
+
+alias mesa-check='echo "MESA_DIR: \$MESA_DIR" && echo "MESASDK_ROOT: \$MESASDK_ROOT"'
+EOF
+
+# 6. 编译 MESA
+echo "编译 MESA（这需要10-30分钟）..."
+cd ~/mesa
+export MESA_DIR="$HOME/mesa"
+export OMP_NUM_THREADS=$CPU_CORES
+
+if ./install; then
+    echo "✓ MESA 编译成功！"
+else
+    echo "编译失败，尝试清理后重试..."
+    ./clean
+    ./install
+fi
+
+# 7. 验证
+echo ""
+echo "=== 安装完成 ==="
+echo "MESA SDK: ~/mesasdk"
+echo "MESA: ~/mesa"
+echo ""
+echo "下一步："
+echo "1. 重新打开终端或运行: source ~/.bashrc"
+echo "2. 测试: cd ~/mesa/star/test_suite/1M_pre_ms_to_wd && ./mk && ./rn"
